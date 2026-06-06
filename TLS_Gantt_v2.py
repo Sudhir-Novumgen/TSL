@@ -7,8 +7,10 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import pymysql
-import json, os, time
+import json, os, time, io
 from datetime import date, timedelta, datetime
+from sshtunnel import SSHTunnelForwarder
+import paramiko
 st.set_page_config(page_title="TLS Drug Discovery", page_icon="🧬",
                    layout="wide", initial_sidebar_state="collapsed")
 st.markdown("""<style>
@@ -41,19 +43,38 @@ st.markdown("""
   </div>
 </div>""", unsafe_allow_html=True)
 # ── DB ─────────────────────────────────────────────────────────────────────────
-_s = st.secrets["db"] if "db" in st.secrets else {}
-DB = dict(
-    host     = _s.get("host",     "167.71.233.211"),
-    user     = _s.get("user",     "POWERBI"),
-    password = _s.get("password", "Powerbi@2024"),
-    database = _s.get("database", "pms_v1"),
-    port     = int(_s.get("port", 3306)),
-    connect_timeout=10,
-    cursorclass=pymysql.cursors.DictCursor,
-)
+@st.cache_resource
+def get_tunnel():
+    ssh = st.secrets["ssh"]
+    pkey = paramiko.RSAKey.from_private_key(io.StringIO(ssh["private_key"]))
+    tunnel = SSHTunnelForwarder(
+        (ssh["host"], 22),
+        ssh_username=ssh["user"],
+        ssh_pkey=pkey,
+        remote_bind_address=("127.0.0.1", 3306),
+    )
+    tunnel.start()
+    return tunnel
+
+def get_conn():
+    _s = st.secrets.get("db", {})
+    if "ssh" in st.secrets:
+        tunnel = get_tunnel()
+        host, port = "127.0.0.1", tunnel.local_bind_port
+    else:
+        host = _s.get("host", "167.71.233.211")
+        port = int(_s.get("port", 3306))
+    return pymysql.connect(
+        host=host, port=port,
+        user=_s.get("user", "POWERBI"),
+        password=_s.get("password", "Powerbi@2024"),
+        database=_s.get("database", "pms_v1"),
+        connect_timeout=10,
+        cursorclass=pymysql.cursors.DictCursor,
+    )
 @st.cache_data(ttl=300)
 def load():
-    conn = pymysql.connect(**DB)
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -105,7 +126,7 @@ def load_weekly_plan():
     today_d = date.today()
     last_mon = today_d - timedelta(days=today_d.weekday() + 7)
     last_sun = last_mon + timedelta(days=6)
-    conn = pymysql.connect(**DB)
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -151,7 +172,7 @@ def load_weekly_plan():
 def load_monthly_plan():
     today_d = date.today()
     month_start = today_d.replace(day=1)
-    conn = pymysql.connect(**DB)
+    conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute("""
