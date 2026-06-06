@@ -41,9 +41,16 @@ st.markdown("""
   </div>
 </div>""", unsafe_allow_html=True)
 # ── DB ─────────────────────────────────────────────────────────────────────────
-DB = dict(host="167.71.233.211", user="POWERBI", password="Powerbi@2024",
-          database="pms_v1", port=3306, connect_timeout=10,
-          cursorclass=pymysql.cursors.DictCursor)
+_s = st.secrets["db"] if "db" in st.secrets else {}
+DB = dict(
+    host     = _s.get("host",     "167.71.233.211"),
+    user     = _s.get("user",     "POWERBI"),
+    password = _s.get("password", "Powerbi@2024"),
+    database = _s.get("database", "pms_v1"),
+    port     = int(_s.get("port", 3306)),
+    connect_timeout=10,
+    cursorclass=pymysql.cursors.DictCursor,
+)
 @st.cache_data(ttl=300)
 def load():
     conn = pymysql.connect(**DB)
